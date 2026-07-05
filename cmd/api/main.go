@@ -1,24 +1,23 @@
 package main
 
 import (
-	"errors"
 	"fmt"
+	"net/http"
+
+	"github.com/go-chi/chi/v5"
 
 	"github.com/AndreiMartynenko/wallet-api/internal/account"
+	"github.com/AndreiMartynenko/wallet-api/internal/api"
 )
 
 func main() {
-	acc := account.NewAccount("acc-001", "Alex")
-	acc.Deposit(5000) // 5000 pence = £50.00
+	store := account.NewStore()
+	server := api.NewServer(store)
 
-	err := acc.Withdraw(7000) // try to withdraw £70 - should fail
-	if err != nil {
-		if errors.Is(err, account.ErrInsufficientFunds) {
-			fmt.Println("Blocked: not enough funds -", err)
-		} else {
-			fmt.Println("Error:", err)
-		}
-		return
-	}
-	fmt.Printf("Balance after withdrawal: %d pence\n", acc.Balance)
+	r := chi.NewRouter()
+	r.Post("/accounts", server.CreateAccount)
+	r.Get("/accounts/{id}", server.GetAccount)
+
+	fmt.Println("Wallet API listening on :8080")
+	http.ListenAndServe(":8080", r)
 }
