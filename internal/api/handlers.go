@@ -9,10 +9,10 @@ import (
 )
 
 type Server struct {
-	store *account.Store
+	store *account.PostgresStore
 }
 
-func NewServer(store *account.Store) *Server {
+func NewServer(store *account.PostgresStore) *Server {
 	return &Server{store: store}
 }
 
@@ -29,7 +29,10 @@ func (s *Server) CreateAccount(w http.ResponseWriter, r *http.Request) {
 	}
 
 	acc := account.NewAccount(req.ID, req.Owner)
-	s.store.Create(acc)
+	if err := s.store.Create(r.Context(), acc); err != nil {
+		http.Error(w, "failed to create account", http.StatusInternalServerError)
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
@@ -39,9 +42,13 @@ func (s *Server) CreateAccount(w http.ResponseWriter, r *http.Request) {
 func (s *Server) GetAccount(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
-	acc, ok := s.store.Get(id)
-	if !ok {
+	acc, err := s.store.Get(r.Context(), id)
+	if errors.Is(err, account.ErrNotFound) {
 		http.Error(w, "account not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		http.Error(w, "failed to fetch account", http.StatusInternalServerError)
 		return
 	}
 
@@ -56,9 +63,13 @@ type transactionRequest struct {
 func (s *Server) Deposit(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
-	acc, ok := s.store.Get(id)
-	if !ok {
+	acc, err := s.store.Get(r.Context(), id)
+	if errors.Is(err, account.ErrNotFound) {
 		http.Error(w, "account not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		http.Error(w, "failed to fetch account", http.StatusInternalServerError)
 		return
 	}
 
@@ -73,6 +84,11 @@ func (s *Server) Deposit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := s.store.UpdateBalance(r.Context(), acc.ID, acc.Balance); err != nil {
+		http.Error(w, "failed to save updated balance", http.StatusInternalServerError)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(acc)
 }
@@ -80,9 +96,13 @@ func (s *Server) Deposit(w http.ResponseWriter, r *http.Request) {
 func (s *Server) Withdraw(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
-	acc, ok := s.store.Get(id)
-	if !ok {
+	acc, err := s.store.Get(r.Context(), id)
+	if errors.Is(err, account.ErrNotFound) {
 		http.Error(w, "account not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		http.Error(w, "failed to fetch account", http.StatusInternalServerError)
 		return
 	}
 
@@ -98,6 +118,11 @@ func (s *Server) Withdraw(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if err := s.store.UpdateBalance(r.Context(), acc.ID, acc.Balance); err != nil {
+		http.Error(w, "failed to save updated balance", http.StatusInternalServerError)
 		return
 	}
 
