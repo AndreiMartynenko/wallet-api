@@ -21,6 +21,12 @@ type createAccountRequest struct {
 	Owner string `json:"owner"`
 }
 
+type transferRequest struct {
+	FromID string `json:"from_id"`
+	ToID   string `json:"to_id"`
+	Amount int64  `json:"amount"`
+}
+
 func (s *Server) CreateAccount(w http.ResponseWriter, r *http.Request) {
 	var req createAccountRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -128,4 +134,30 @@ func (s *Server) Withdraw(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(acc)
+}
+
+func (s *Server) Transfer(w http.ResponseWriter, r *http.Request) {
+	var req transferRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	err := s.store.Transfer(r.Context(), req.FromID, req.ToID, req.Amount)
+	if err != nil {
+		switch {
+		case errors.Is(err, account.ErrInsufficientFunds):
+			http.Error(w, err.Error(), http.StatusPaymentRequired)
+		case errors.Is(err, account.ErrNotFound):
+			http.Error(w, "account not found", http.StatusNotFound)
+		case errors.Is(err, account.ErrInvalidAmount):
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		default:
+			http.Error(w, "transfer failed", http.StatusInternalServerError)
+		}
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"status":"transfer complete"}`))
 }

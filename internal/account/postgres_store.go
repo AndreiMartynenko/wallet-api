@@ -49,3 +49,60 @@ func (s *PostgresStore) UpdateBalance(ctx context.Context, id string, newBalance
 	)
 	return err
 }
+
+func (s *PostgresStore) Transfer(ctx context.Context, fromID, toID string, amount int64) error {
+	if amount <= 0 {
+		return ErrInvalidAmount
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx) // no-op if already committed
+
+	var fromBalance int64
+	err = tx.QueryRow(ctx,
+		`SELECT balance FROM accounts WHERE id = $1 FOR UPDATE`,
+		fromID,
+	).Scan(&fromBalance)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+
+	if fromBalance < amount {
+		return ErrInsufficientFunds
+	}
+
+	_, err = tx.Exec(ctx,
+		`UPDATE accounts SET balance = balance - $1 WHERE id = $2`,
+		amount, fromID,
+	)
+	if err != nil {
+		return err
+	}
+
+	res, err := tx.Exec(ctx,
+		`UPDATE accounts SET balance = balance + $1 WHERE id = $2`,
+		amount, toID,
+	)
+	if err != nil {
+		return err
+	}
+	if res.RowsAffected() == 0 {
+		return ErrNotFound // toID didn't exist
+	}
+
+	_, err = tx.Exec(ctx,
+		`INSERT INTO transactions (debit_account_id, credit_account_id, amount) VALUES ($1, $2, $3)`,
+		fromID, toID, amount,
+	)
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
+}
