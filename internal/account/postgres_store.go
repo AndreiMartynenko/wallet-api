@@ -3,6 +3,7 @@ package account
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -12,6 +13,14 @@ var ErrNotFound = errors.New("account not found")
 
 type PostgresStore struct {
 	pool *pgxpool.Pool
+}
+
+type Transaction struct {
+	ID              int64     `json:"id"`
+	DebitAccountID  string    `json:"debit_account_id"`
+	CreditAccountID string    `json:"credit_account_id"`
+	Amount          int64     `json:"amount"`
+	CreatedAt       time.Time `json:"created_at"`
 }
 
 func NewPostgresStore(pool *pgxpool.Pool) *PostgresStore {
@@ -105,4 +114,28 @@ func (s *PostgresStore) Transfer(ctx context.Context, fromID, toID string, amoun
 	}
 
 	return tx.Commit(ctx)
+}
+
+func (s *PostgresStore) ListTransactions(ctx context.Context, accountID string) ([]Transaction, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, debit_account_id, credit_account_id, amount, created_at
+		 FROM transactions
+		 WHERE debit_account_id = $1 OR credit_account_id = $1
+		 ORDER BY created_at DESC`,
+		accountID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var txs []Transaction
+	for rows.Next() {
+		var t Transaction
+		if err := rows.Scan(&t.ID, &t.DebitAccountID, &t.CreditAccountID, &t.Amount, &t.CreatedAt); err != nil {
+			return nil, err
+		}
+		txs = append(txs, t)
+	}
+	return txs, rows.Err()
 }

@@ -30,6 +30,7 @@ func main() {
 	r.Get("/accounts/{id}", server.GetAccount)
 	r.Post("/accounts/{id}/deposit", server.Deposit)
 	r.Post("/accounts/{id}/withdraw", server.Withdraw)
+	r.Get("/accounts/{id}/transactions", server.ListTransactions)
 	r.Post("/transfer", server.Transfer)
 
 	fmt.Println("Wallet API listening on :8080")

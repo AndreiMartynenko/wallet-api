@@ -161,3 +161,16 @@ func (s *Server) Transfer(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"status":"transfer complete"}`))
 }
+
+func (s *Server) ListTransactions(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	txs, err := s.store.ListTransactions(r.Context(), id)
+	if err != nil {
+		http.Error(w, "failed to fetch transactions", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(txs)
+}
