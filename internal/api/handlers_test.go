@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -8,10 +9,23 @@ import (
 
 	"github.com/AndreiMartynenko/wallet-api/internal/account"
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func newTestServer() (*Server, *chi.Mux) {
-	store := account.NewStore()
+func newTestServer(t *testing.T) (*Server, *chi.Mux) {
+	t.Helper()
+
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, "postgres://wallet:wallet@localhost:5433/wallet")
+	if err != nil {
+		t.Fatalf("failed to connect to test database: %v", err)
+	}
+	t.Cleanup(func() { pool.Close() })
+
+	pool.Exec(ctx, "DELETE FROM transactions")
+	pool.Exec(ctx, "DELETE FROM accounts")
+
+	store := account.NewPostgresStore(pool)
 	server := NewServer(store)
 
 	r := chi.NewRouter()
@@ -24,7 +38,7 @@ func newTestServer() (*Server, *chi.Mux) {
 }
 
 func TestCreateAccount(t *testing.T) {
-	_, router := newTestServer()
+	_, router := newTestServer(t)
 
 	body := strings.NewReader(`{"id":"acc-1","owner":"Alex"}`)
 	req := httptest.NewRequest(http.MethodPost, "/accounts", body)
@@ -42,7 +56,7 @@ func TestCreateAccount(t *testing.T) {
 }
 
 func TestDepositAndWithdrawEndpoints(t *testing.T) {
-	_, router := newTestServer()
+	_, router := newTestServer(t)
 
 	// Create the account first.
 	createBody := strings.NewReader(`{"id":"acc-2","owner":"Sam"}`)
@@ -75,7 +89,7 @@ func TestDepositAndWithdrawEndpoints(t *testing.T) {
 }
 
 func TestGetAccountNotFound(t *testing.T) {
-	_, router := newTestServer()
+	_, router := newTestServer(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/accounts/does-not-exist", nil)
 	w := httptest.NewRecorder()
