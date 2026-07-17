@@ -59,6 +59,93 @@ func (s *PostgresStore) UpdateBalance(ctx context.Context, id string, newBalance
 	return err
 }
 
+// Deposit atomically increases an account's balance. It locks the row for
+// the duration of the transaction so concurrent deposits/withdraws on the
+// same account can't race each other (see the Day 16 in-memory version,
+// which read the balance, mutated it in Go, then wrote it back — two
+// concurrent requests could both read the same starting balance and one
+// update would clobber the other).
+func (s *PostgresStore) Deposit(ctx context.Context, id string, amount int64) (*Account, error) {
+	if amount <= 0 {
+		return nil, ErrInvalidAmount
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+
+	var acc Account
+	err = tx.QueryRow(ctx,
+		`SELECT id, owner, balance FROM accounts WHERE id = $1 FOR UPDATE`,
+		id,
+	).Scan(&acc.ID, &acc.Owner, &acc.Balance)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	acc.Balance += amount
+
+	if _, err := tx.Exec(ctx,
+		`UPDATE accounts SET balance = $1 WHERE id = $2`,
+		acc.Balance, id,
+	); err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return &acc, nil
+}
+
+// Withdraw atomically decreases an account's balance, holding the same
+// row lock as Deposit so the two can never race on the same account.
+func (s *PostgresStore) Withdraw(ctx context.Context, id string, amount int64) (*Account, error) {
+	if amount <= 0 {
+		return nil, ErrInvalidAmount
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+
+	var acc Account
+	err = tx.QueryRow(ctx,
+		`SELECT id, owner, balance FROM accounts WHERE id = $1 FOR UPDATE`,
+		id,
+	).Scan(&acc.ID, &acc.Owner, &acc.Balance)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	if amount > acc.Balance {
+		return nil, ErrInsufficientFunds
+	}
+	acc.Balance -= amount
+
+	if _, err := tx.Exec(ctx,
+		`UPDATE accounts SET balance = $1 WHERE id = $2`,
+		acc.Balance, id,
+	); err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return &acc, nil
+}
+
 func (s *PostgresStore) Transfer(ctx context.Context, fromID, toID string, amount int64) error {
 	if amount <= 0 {
 		return ErrInvalidAmount
